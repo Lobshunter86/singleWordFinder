@@ -11,7 +11,7 @@ import (
 
 const (
 	Sample = "/home/lob/learning/singleWordFinder/sample/sample.csv"
-	Chunk  = 1024 * 1024
+	Chunk  = 1024 * 1024 * 16
 	Delim  = '\n'
 )
 
@@ -30,7 +30,7 @@ func testSpiltFile() {
 }
 
 // another approach, must be correct
-func testFirstUnique() {
+func FirstUnique() {
 	dictFile, err := os.Open("/home/lob/learning/singleWordFinder/sample/sample.csv")
 	must(err)
 	defer dictFile.Close()
@@ -108,10 +108,14 @@ func testALL() {
 	for i := 0; i < len(starts); i++ {
 		word, pos, err = singleWordFinder.Reducer(i)
 		must(err)
-		if _, ok := firsts[word]; ok {
-			panic("NOTTTTTTTTTT UNIQUE")
+
+		if len(word) > 0 {
+			if _, ok := firsts[word]; ok {
+				panic("NOTTTTTTTTTT UNIQUE")
+			}
+			firsts[word] = pos
 		}
-		firsts[word] = pos
+
 	}
 
 	var firstWord string
@@ -126,8 +130,15 @@ func testALL() {
 	println("first:", firstWord, firstPos)
 }
 
+func testFindUnique() {
+	word, err := singleWordFinder.FindUnique(Sample, Chunk)
+	must(err)
+	println("first:", word)
+}
+
 func main() {
-	testALL()
+	testFindUnique()
+	// testALL()
 }
 
 func must(err error) {

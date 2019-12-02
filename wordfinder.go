@@ -11,8 +11,11 @@ import (
 
 const (
 	MAXLINE = 64
-	BASEDIR = "/home/lob/learning/singleWordFinder/tmp/"
 )
+
+// directory that stores tmp file
+// var BASEDIR = "/home/lob/learning/singleWordFinder/tmp/"
+var BASEDIR = "./tmp/"
 
 // spiltFile read a file, logically spilt them into parts in chunkSize
 // each part ends with delim, returns offsets of each part
@@ -59,7 +62,7 @@ func SpiltFile(file *os.File, chunkSize int64, delim byte) ([]int64, error) {
 	return starts, nil
 }
 
-// reads file
+// Mapper reads part of the original file, writes unique words in that part into n files
 func Mapper(inFilePath string, start int64, end int64, nReducer int) error {
 	inFile, err := os.Open(inFilePath)
 	if err != nil {
@@ -85,7 +88,8 @@ func Mapper(inFilePath string, start int64, end int64, nReducer int) error {
 	var ok bool
 	var pos int64 = start
 	word, err := breader.ReadString('\n')
-	for err == nil {
+
+	for len(word) > 0 {
 		if _, ok = words[word]; !ok {
 			words[word] = pos
 		} else {
@@ -99,10 +103,10 @@ func Mapper(inFilePath string, start int64, end int64, nReducer int) error {
 		return err
 	}
 
-	// put unique words into files base on hashed value
+	// put unique words into files base on hash value
 	outFiles := make([]*bufio.Writer, nReducer)
 	for i := range outFiles {
-		file, err := os.OpenFile(BASEDIR+"Hashed_"+strconv.Itoa(i), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0666)
+		file, err := os.OpenFile(BASEDIR+reduceName(i), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0666)
 		if err != nil {
 			return err
 		}
@@ -132,7 +136,7 @@ func Mapper(inFilePath string, start int64, end int64, nReducer int) error {
 
 // Reducer return the first unique word in corresponding file
 func Reducer(reduceNum int) (string, int, error) {
-	filePath := BASEDIR + "Hashed_" + strconv.Itoa(reduceNum)
+	filePath := BASEDIR + reduceName(reduceNum)
 	file, err := os.Open(filePath)
 	if err != nil {
 		return "", -1, err
@@ -166,7 +170,7 @@ func Reducer(reduceNum int) (string, int, error) {
 	}
 
 	// find first unique word
-	first := int(^uint(0) >> 1)
+	first := int(^uint(0) >> 1) // init to max int
 	var firstWord string
 
 	for word, pos = range words {
@@ -177,6 +181,85 @@ func Reducer(reduceNum int) (string, int, error) {
 	}
 
 	return firstWord, first, nil
+}
+
+// Findunique calls mapper and reducer, find the first unique word in filePath
+// each mapper reads chunkSize of data from original file
+func FindUnique(filePath string, chunkSize int64) (string, error) {
+	file, err := os.Open(filePath)
+	if err != nil {
+		return "", err
+	}
+
+	starts, err := SpiltFile(file, chunkSize, '\n')
+	if err != nil {
+		return "", err
+	}
+
+	// mappers
+	for i := 0; i < len(starts)-1; i++ {
+		err = Mapper(filePath, starts[i], starts[i+1], len(starts))
+		if err != nil {
+			return "", err
+		}
+	}
+	// map last segment
+	stat, err := file.Stat()
+	if err != nil {
+		return "", err
+	}
+	size := stat.Size()
+
+	err = Mapper(filePath, starts[len(starts)-1], size, len(starts))
+	if err != nil {
+		return "", err
+	}
+
+	defer cleanup(len(starts))
+
+	// reducers
+	firsts := make(map[string]int)
+	var word string
+	var pos int
+	for i := 0; i < len(starts); i++ {
+		word, pos, err = Reducer(i)
+		if err != nil {
+			return "", err
+		}
+		if len(word) > 0 {
+			// if _, ok := firsts[word]; ok {
+			// 	// same word show up in different hashed file
+			// 	// fatal error
+			// }
+			firsts[word] = pos
+		}
+	}
+
+	var firstWord string
+	firstPos := int(^uint(0) >> 1)
+	for word, pos = range firsts {
+		if pos >= 0 && pos < firstPos {
+			firstPos = pos
+			firstWord = word
+		}
+	}
+
+	return firstWord, nil
+}
+
+func reduceName(i int) string {
+	return "Hashed_" + strconv.Itoa(i)
+}
+
+// clearnup removes tmp files
+func cleanup(nreducer int) error {
+	for i := 0; i < nreducer; i++ {
+		err := os.Remove(BASEDIR + reduceName(i))
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func hash(s string) uint32 {
